@@ -62,7 +62,7 @@ def archive(archive_name, file_list):
 def create_path(path):
     if not path:
         return
-    if not os.path.exists(path):
+    if not os.path.isdir(path):
         try:
             os.makedirs(path)
         except NotADirectoryError as e:
@@ -77,9 +77,6 @@ def extract_files(archive_name):
 
     a_size = os.path.getsize(archive_name)
 
-    def corrupted_file():
-        print("File `{}` corrupted, aborting".format(fname(archive_name)))
-        exit()
 
     with open(archive_name, "rb") as f:
         f.seek(len(MAGIC_NUMBER))
