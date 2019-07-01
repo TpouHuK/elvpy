@@ -10,7 +10,6 @@ def invalid_usage():
     print("elv [alx] <Archive_name.elv> [FILE...]")
     exit()
 
-
 def int_as_u64(i):
     return (i).to_bytes(8, byteorder='little', signed=False)
 
