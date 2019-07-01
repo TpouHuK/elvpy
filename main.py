@@ -48,13 +48,22 @@ def archive(archive_name, file_list):
         print("File `{}` already exists, aborting".format(fname(archive_name)))
         exit()
 
-    for f in file_list:
+    i = 0
+    while i < len(file_list):
+        f = file_list[i]
+        print(f)
         if not os.path.exists(f):
             print("File `{}` not exists, aborting".format(fname(f)))
             exit()
         if os.path.isdir(f):
-            file_list.extend([os.path.join(f, n) for n in os.listdir(f)])
+            #FIXME fix ignoring hidden files for window
+            file_list.extend([os.path.relpath(os.path.normpath(os.path.join(f, n)))
+                              for n in os.listdir(f) if not n.startswith('.')])
             file_list.remove(f)
+            i -= 1
+        i += 1
+
+    print(file_list)
 
     with open(archive_name, "wb") as out_f:
         out_f.write(MAGIC_NUMBER)
@@ -121,16 +130,15 @@ def extract_files(archive_name):
             path, name = os.path.split(fullpath)
 
             print("Extracting `{}`...".format(fname(fullpath)))
-            if os.path.exists(name):
+            if os.path.exists(fullpath):
                 print("File `{}` already exists, aborting".format(fname(fullpath)))
                 exit()
             create_path(path)
 
             content_size = bytes_as_int(read(8))
             # if f.tell() + content_size > a_size: corrupted_file()
-            data = read(content_size)
             with open(fullpath, "wb") as out_f:
-                block_copy(f, out_f)
+                block_copy(f, out_f, content_size)
 
     print("Done")
 
