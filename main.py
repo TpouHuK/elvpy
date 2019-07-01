@@ -10,17 +10,31 @@ def invalid_usage():
     print("elv [alx] <Archive_name.elv> [FILE...]")
     exit()
 
-def int_as_u64(i):
+def int_to_u64(i):
     return (i).to_bytes(8, byteorder='little', signed=False)
 
-def int_as_u32(i):
+def int_to_u32(i):
     return (i).to_bytes(4, byteorder='little', signed=False)
 
-def bytes_as_int(i):
+def bytes_to_int(i):
     return int.from_bytes(i, byteorder="little", signed=False)
 
 def fname(name):
     return repr(name)[1:-1]
+
+def ensure_file_not_exists(path):
+    if not os.path.exists(path):
+        print("File `{}` already exists, aborting".format(fname(path)))
+        exit()
+
+def ensure_file_exists(path):
+    if os.path.exists(path):
+        print("File `{}` not exists, aborting".format(fname(path)))
+        exit()
+
+def archive_file_corrupted(name, reason):
+    print("`{}` is not valid .elv file".format(name))
+    print(reason)
 
 #TODO mmap instead of block copy
 def block_copy(from_f, to_f, amount=-1):
@@ -33,9 +47,12 @@ def block_copy(from_f, to_f, amount=-1):
         while amount > 0:
             size = min(amount, BLOCK_COPY_SIZE)
             block = from_f.read(size)
+
             if len(block) != size:
-                print("Corrupted file")
+                print("Something went wrong while copying...")
+                print("From `{}` to `{}`".format(from_f.name, to_f.name))
                 exit()
+                
             to_f.write(block)
             amount -= BLOCK_COPY_SIZE
 
@@ -43,47 +60,34 @@ def archive(archive_name, file_list):
     if len(file_list) == 0:
         invalid_usage()
 
-    if os.path.exists(archive_name):
-        print("File `{}` already exists, aborting".format(fname(archive_name)))
-        exit()
+    ensure_file_not_exists(archive_name)
 
     i = 0
     while i < len(file_list):
         f = file_list[i]
-        print(f)
-        if not os.path.exists(f):
-            print("File `{}` not exists, aborting".format(fname(f)))
-            exit()
+        ensure_file_exists(f)
+
         if os.path.isdir(f):
-            #FIXME fix ignoring hidden files for window
             file_list.extend([os.path.relpath(os.path.normpath(os.path.join(f, n)))
-                              for n in os.listdir(f) if not n.startswith('.')])
+                              for n in os.listdir(f)])
             file_list.remove(f)
             i -= 1
         i += 1
 
-    print(file_list)
-
     with open(archive_name, "wb") as out_f:
         out_f.write(MAGIC_NUMBER)
-        for archiving_file in file_list:
-            if not os.path.exists(archiving_file):
-                print("File `{}` not found, aborting"
-                      .format(fname(archiving_file)))
-                exit()
 
+        for archiving_file in file_list:
             print("Archiving {}...".format(fname(archiving_file)))
             with open(archiving_file, "rb") as in_f:
                 size = os.path.getsize(archiving_file)
                 file_name = archiving_file.encode("UTF-8")
 
-                out_f.write(int_as_u32(len(file_name))) # name size
+                out_f.write(int_to_u32(len(file_name))) # name size
                 out_f.write(file_name) # name in utf-8
 
-                out_f.write(int_as_u64(size)) #content size
-                block_copy(in_f, out_f) #content
-
-    print("Done")
+                out_f.write(int_to_u64(size)) # content size
+                block_copy(in_f, out_f) # content
 
 def create_path(path):
     if not path:
@@ -92,88 +96,87 @@ def create_path(path):
         try:
             os.makedirs(path)
         except NotADirectoryError as e:
-            print("{}".format(e))
+            print("Trying to create path: `{}`, and following error happened:".format(path))
+            print(str(e))
             exit()
 
-def extract_files(archive_name):
-    if not os.path.exists(archive_name):
-        print("File `{}` not found, aborting"
-              .format(fname(archiving_archive_name)))
-        exit()
+def extract_files(a_name):
+    ensure_file_exists(a_name)
 
-    a_size = os.path.getsize(archive_name)
+    a_size = os.path.getsize(a_name)
 
-    def corrupted_file():
-        print("File `{}` corrupted, aborting".format(fname(archive_name)))
-        exit()
-
-    with open(archive_name, "rb") as f:
-        f.seek(len(MAGIC_NUMBER))
+    with open(a_name, "rb") as f:
+        magic = f.read(len(MAGIC_NUMBER))
+        if magic != MAGIC_NUMBER:
+            archive_file_corrupted(a_name,
+                                   ("Magick number doesn't match, "
+                                    "expected {}, got {}")
+                                   .format(MAGIC_NUMBER, magic)
+                                   )
 
         def read(n):
             data = f.read(n)
-            if len(data) != n: corrupted_file()
+            if len(data) != n:
+                archive_file_corrupted(a_name, "Error, reached file end too soon.")
             return data
 
         while True:
             if f.tell() == a_size:
                 break
 
-            name_len = bytes_as_int(read(4))
-            # if f.tell() + name_len > a_size: corrupted_file()
-            if name_len == 0: corrupted_file()
+            name_len = bytes_to_int(read(4))
+
+            if name_len == 0: archive_file_corrupted(a_name, "Got zero length file name.")
             try:
                 fullpath = read(name_len).decode("UTF-8")
-            except UnicodeDecodeError:
-                corrupted_file()
+            except UnicodeDecodeError as e:
+                archive_file_corrupted(a_name, "Error at decoding file name:\n {}".format(e))
             path, name = os.path.split(fullpath)
 
             print("Extracting `{}`...".format(fname(fullpath)))
-            if os.path.exists(fullpath):
-                print("File `{}` already exists, aborting".format(fname(fullpath)))
-                exit()
-            create_path(path)
+            ensure_file_not_exists(fullpath)
 
-            content_size = bytes_as_int(read(8))
-            # if f.tell() + content_size > a_size: corrupted_file()
+            content_size = bytes_to_int(read(8))
+            create_path(path)
             with open(fullpath, "wb") as out_f:
                 block_copy(f, out_f, content_size)
 
-    print("Done")
+def list_files(a_name):
+    ensure_file_exists(a_name)
 
-def list_files(archive_name):
-    if not os.path.exists(archive_name):
-        print("File `{}` not found, aborting"
-              .format(fname(archive_name)))
-        exit()
+    a_size = os.path.getsize(a_name)
 
-    a_size = os.path.getsize(archive_name)
 
-    def corrupted_file():
-        print("File `{}` corrupted, aborting".format(fname(archive_name)))
-        exit()
-
-    with open(archive_name, "rb") as f:
-        f.seek(len(MAGIC_NUMBER))
+    with open(a_name, "rb") as f:
         def read(n):
             data = f.read(n)
-            if len(data) != n: corrupted_file()
+            if len(data) != n:
+                archive_file_corrupted(a_name, "Error, reached file end too soon.")
             return data
 
-        name_len = bytes_as_int(read(4))
+        magic = f.read(len(MAGIC_NUMBER))
+        if magic != MAGIC_NUMBER:
+            archive_file_corrupted(a_name,
+                                   ("Magick number doesn't match, "
+                                    "expected {}, got {}")
+                                   .format(MAGIC_NUMBER, magic)
+                                   )
+
+        name_len = bytes_to_int(read(4))
         if f.tell() + name_len > a_size: corrupted_file()
-        if name_len == 0: corrupted_file()
+        if name_len == 0: archive_file_corrupted(a_name, "Got zero length file name.")
+
         try:
             name = read(name_len).decode("UTF-8")
-        except UnicodeDecodeError:
-            corrupted_file()
-        content_size = bytes_as_int(read(8))
+        except UnicodeDecodeError as e:
+            archive_file_corrupted(a_name, "Error at decoding file name:\n {}".format(e))
+
+        content_size = bytes_to_int(read(8))
 
         print(fname(name)+'\t'+str(content_size))
 
-        if f.tell() + content_size > a_size: corrupted_file()
+        if f.tell() + content_size > a_size: archive_file_corrupted()
         f.seek(content_size, 1)
-    print("Done")
 
 def main():
     args = sys.argv
