@@ -95,6 +95,9 @@ def extract_files(archive_name):
 
     a_size = os.path.getsize(archive_name)
 
+    def corrupted_file():
+        print("File `{}` corrupted, aborting".format(fname(archive_name)))
+        exit()
 
     with open(archive_name, "rb") as f:
         f.seek(len(MAGIC_NUMBER))
