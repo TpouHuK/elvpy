@@ -3,6 +3,7 @@ import sys
 import os
 
 MAGIC_NUMBER = b'elv'
+BLOCK_COPY_SIZE = 16777216 # 16MiB in bytes
 
 def invalid_usage():
     print("Usage:")
@@ -21,6 +22,23 @@ def bytes_as_int(i):
 
 def fname(name):
     return repr(name)[1:-1]
+
+#TODO mmap instead of block copy
+def block_copy(from_f, to_f, amount=-1):
+    if amount == -1:
+        block = from_f.read(BLOCK_COPY_SIZE)
+        while block:
+            to_f.write(block)
+            block = from_f.read(BLOCK_COPY_SIZE)
+    else:
+        while amount > 0:
+            size = min(amount, BLOCK_COPY_SIZE)
+            block = from_f.read(size)
+            if len(block) != size:
+                print("Corrupted file")
+                exit()
+            to_f.write(block)
+            amount -= BLOCK_COPY_SIZE
 
 def archive(archive_name, file_list):
     if len(file_list) == 0:
@@ -55,7 +73,7 @@ def archive(archive_name, file_list):
                 out_f.write(file_name) # name in utf-8
 
                 out_f.write(int_as_u64(size)) #content size
-                out_f.write(in_f.read()) # content
+                block_copy(in_f, out_f) #content
 
     print("Done")
 
@@ -109,7 +127,7 @@ def extract_files(archive_name):
             # if f.tell() + content_size > a_size: corrupted_file()
             data = read(content_size)
             with open(fullpath, "wb") as out_f:
-                out_f.write(data)
+                block_copy(f, out_f)
 
     print("Done")
 
