@@ -33,8 +33,19 @@ def ensure_file_exists(path):
         print("File `{}` not exists, aborting".format(fname(path)))
         exit()
 
+def safe_file_path(path):
+    # Only relative paths allowed
+    if os.isabs(path):
+        return False
+
+    # No parent file insertion
+    if path.startswith("../") or path.endswith("/..") or "/../" in path:
+        return False
+
+    return True
+
 def archive_file_corrupted(name, reason):
-    if MEANINGFULL_MESSAGES
+    if MEANINGFULL_MESSAGES:
         print("`{}` is not valid .elv file".format(name))
         print(reason)
     else:
@@ -138,9 +149,8 @@ def extract_files(a_name):
                 archive_file_corrupted(a_name, "Error at decoding file name:\n {}".format(e))
             path, name = os.path.split(fullpath)
 
-            if file_name.startswith("/"):
-                print("Only relative paths allowed, found {}".format(fullpath))
-                print("Ignoring file...")
+            if not safe_file_path(fullpath):
+                print("Unsafe file path: `{}`".format(fullpath))
                 f.seek(content_size, 1)
                 continue
 
@@ -182,7 +192,7 @@ def list_files(a_name):
 
             content_size = bytes_to_int(read(8))
 
-            if not file_name.startswith("//")
+            if not name.startswith("//"):
                 print(fname(name)+'\t'+str(content_size))
 
             if f.tell() + content_size > a_size: archive_file_corrupted()
